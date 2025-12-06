@@ -1,0 +1,62 @@
+services:
+  redis:
+    profiles: ["worker"]
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  worker:
+    profiles: ["worker"]
+    build:
+      context: ./worker
+      dockerfile: Dockerfile
+    ports:
+      - "${WORKER_HOST_PORT:-5345}:5345"
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      - WORKER_CONCURRENCY=10
+      - JOB_TTL_SECONDS=86400
+      - PORT=5345
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  gateway:
+    profiles: ["gateway"]
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    ports:
+      - "${GATEWAY_HOST_PORT:-18080}:8080"
+    environment:
+      - BACKEND_PROXY_URL=${BACKEND_PROXY_URL:-http://worker:5345}
+      - POLL_INTERVAL_MS=500
+      - RETRY_BACKOFF_INIT_MS=1000
+      - RETRY_BACKOFF_MAX_MS=30000
+      - JOB_TIMEOUT_MS=1800000
+      - OPENAI_API_KEY_REQUIRED=false
+      - PORT=8080
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  redis_data:
