@@ -46,7 +46,7 @@ services:
     ports:
       - "${GATEWAY_HOST_PORT:-18080}:8080"
     environment:
-      - BACKEND_PROXY_URL=${BACKEND_PROXY_URL:-http://worker:5345}
+      - BACKEND_PROXY_URL=${BACKEND_PROXY_URL:-http://192.168.1.218:5345}
       - POLL_INTERVAL_MS=500
       - RETRY_BACKOFF_INIT_MS=1000
       - RETRY_BACKOFF_MAX_MS=30000

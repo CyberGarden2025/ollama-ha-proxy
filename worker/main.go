@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -10,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -360,20 +362,29 @@ func (w *Worker) processJob(jobID string) {
 		return
 	}
 
-	decoder := json.NewDecoder(resp.Body)
+	scanner := bufio.NewScanner(resp.Body)
+	// allow large tokens for streaming responses
+	buf := make([]byte, 0, 1024*64)
+	scanner.Buffer(buf, 1024*1024)
 	finishReason := "stop"
 
-	for {
+	for scanner.Scan() {
 		if w.isCancelled(jobID) {
 			w.finishJobWithError(jobID, "cancelled")
 			return
 		}
 
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if payload == "" || payload == "[DONE]" {
+			break
+		}
+
 		var streamResp OllamaStreamResponse
-		if err := decoder.Decode(&streamResp); err != nil {
-			if err == io.EOF {
-				break
-			}
+		if err := json.Unmarshal([]byte(payload), &streamResp); err != nil {
 			w.finishJobWithError(jobID, fmt.Sprintf("decode error: %v", err))
 			return
 		}
@@ -404,6 +415,11 @@ func (w *Worker) processJob(jobID string) {
 		if streamResp.Done {
 			break
 		}
+	}
+
+	if err := scanner.Err(); err != nil && err != io.EOF {
+		w.finishJobWithError(jobID, fmt.Sprintf("stream error: %v", err))
+		return
 	}
 
 	now := time.Now().Format(time.RFC3339)
