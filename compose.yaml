@@ -18,11 +18,13 @@ services:
     build:
       context: ./worker
       dockerfile: Dockerfile
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "${WORKER_HOST_PORT:-5345}:5345"
     environment:
       - REDIS_URL=redis://redis:6379/0
-      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://192.168.1.218:11434}
       - WORKER_CONCURRENCY=10
       - JOB_TTL_SECONDS=86400
       - PORT=5345

@@ -57,7 +57,7 @@ make worker-logs
 
 ```bash
 make gateway-build
-BACKEND_PROXY_URL=http://<worker-host>:5345 make gateway-up
+BACKEND_PROXY_URL=http://192.168.1.218:5345 make gateway-up
 make gateway-logs
 ```
 
@@ -81,10 +81,12 @@ make local-down
 Переменные окружения:
 
 - `REDIS_URL` - URL Redis (по умолчанию: `redis://localhost:6379/0`)
-- `OLLAMA_BASE_URL` - URL Ollama (по умолчанию: `http://127.0.0.1:11434`)
+- `OLLAMA_BASE_URL` - URL Ollama (по умолчанию: `http://192.168.1.218:11434` — для текущего сервера worker)
 - `WORKER_CONCURRENCY` - количество воркеров (по умолчанию: `10`)
 - `JOB_TTL_SECONDS` - время жизни jobs (по умолчанию: `86400`)
 - `PORT` - порт сервиса (по умолчанию: `5345`)
+
+> Если Ollama запущена на хосте и контейнер не может резолвить `host.docker.internal`, задайте `OLLAMA_BASE_URL` с явным IP хоста (например `http://192.168.1.10:11434`) или убедитесь, что в compose есть `extra_hosts: ["host.docker.internal:host-gateway"]` для сервиса worker.
 
 #### Gateway (Frontend)
 
@@ -474,7 +476,7 @@ docker compose -f compose.yaml --profile gateway exec gateway wget -O- http://wo
 Проверьте `OLLAMA_BASE_URL`:
 
 ```bash
-docker compose -f compose.yaml --profile worker exec worker wget -O- http://host.docker.internal:11434/api/tags
+docker compose -f compose.yaml --profile worker exec worker wget -O- http://192.168.1.218:11434/api/tags
 ```
 
 ### Redis ошибки
