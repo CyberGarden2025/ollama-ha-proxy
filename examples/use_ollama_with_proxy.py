@@ -3,12 +3,25 @@
 Примеры использования Ollama Proxy с OpenAI-совместимым API
 """
 
+import os
 import requests
 import json
 import time
-from typing import Iterator
+from typing import Iterator, Optional
 
-BASE_URL = "http://localhost:18080"
+BASE_URL = os.getenv("BASE_URL", "http://localhost:18080")
+REQUEST_TIMEOUT = float(os.getenv("REQUEST_TIMEOUT", "60"))
+STREAM_TIMEOUT = float(os.getenv("STREAM_TIMEOUT", "90"))
+
+
+def _print_error(resp: requests.Response, prefix: str = "Error"):
+    try:
+        body = resp.text
+    except Exception:
+        body = "<unreadable body>"
+    print(f"{prefix}: {resp.status_code}")
+    if body:
+        print(body)
 
 def example_streaming_request():
     """Пример streaming запроса с обработкой SSE"""
@@ -23,15 +36,27 @@ def example_streaming_request():
         "temperature": 0.7
     }
     
-    response = requests.post(
-        f"{BASE_URL}/v1/chat/completions",
-        json=payload,
-        stream=True,
-        timeout=300
-    )
+    try:
+        response = requests.post(
+            f"{BASE_URL}/v1/chat/completions",
+            json=payload,
+            stream=True,
+            timeout=REQUEST_TIMEOUT
+        )
+    except requests.RequestException as e:
+        print(f"Streaming request failed: {e}")
+        return
+
+    if response.status_code != 200:
+        _print_error(response, "Streaming request failed")
+        return
     
     print("Response chunks:")
+    start = time.time()
     for line in response.iter_lines():
+        if time.time() - start > STREAM_TIMEOUT:
+            print("\n[Stream aborted due to timeout]")
+            break
         if line:
             line = line.decode('utf-8')
             if line.startswith('data: '):
@@ -41,9 +66,14 @@ def example_streaming_request():
                     break
                 try:
                     chunk = json.loads(data)
-                    content = chunk['choices'][0]['delta'].get('content', '')
+                    choice = chunk['choices'][0]
+                    delta = choice.get('delta', {}) or {}
+                    content = delta.get('content') or choice.get('message', {}).get('content')
                     if content:
                         print(content, end='', flush=True)
+                    else:
+                        # fallback: show raw chunk for debugging empty payloads
+                        print(f"\n[chunk no content] {json.dumps(chunk, ensure_ascii=False)}")
                 except json.JSONDecodeError:
                     pass
     print()
@@ -65,17 +95,18 @@ def example_non_streaming_request():
     response = requests.post(
         f"{BASE_URL}/v1/chat/completions",
         json=payload,
-        timeout=300
+        timeout=REQUEST_TIMEOUT
     )
-    
-    if response.status_code == 200:
+
+    try:
+        response.raise_for_status()
         result = response.json()
         print("Response:")
         print(result['choices'][0]['message']['content'])
         print(f"\nFinish reason: {result['choices'][0]['finish_reason']}")
-    else:
-        print(f"Error: {response.status_code}")
-        print(response.text)
+    except requests.RequestException as e:
+        print(f"Non-streaming request failed: {e}")
+        _print_error(response)
 
 
 def example_get_models():
@@ -89,7 +120,7 @@ def example_get_models():
         for model in models['data']:
             print(f"- {model['id']} (owned by: {model['owned_by']})")
     else:
-        print(f"Error: {response.status_code}")
+        _print_error(response)
 
 
 def example_get_stats():
@@ -112,7 +143,7 @@ def example_get_stats():
         if stats['queued'] > stats['capacity'] // 2:
             print("⚠️  High queue load")
     else:
-        print(f"Error: {response.status_code}")
+        _print_error(response)
 
 
 def example_rate_limit_handling():
@@ -145,7 +176,7 @@ def example_rate_limit_handling():
                         print("Max retries exceeded")
                         return None
                 else:
-                    print(f"Error: {response.status_code}")
+                    _print_error(response)
                     return None
             except Exception as e:
                 print(f"Request failed: {e}")
@@ -178,7 +209,7 @@ def example_conversation():
         response = requests.post(
             f"{BASE_URL}/v1/chat/completions",
             json=payload,
-            timeout=300
+            timeout=REQUEST_TIMEOUT
         )
         
         if response.status_code == 200:
@@ -193,7 +224,7 @@ def example_conversation():
             if turn == 0:
                 messages.append({"role": "user", "content": "Расскажи короткую шутку"})
         else:
-            print(f"Error: {response.status_code}")
+            _print_error(response)
             break
 
 
@@ -246,18 +277,28 @@ def example_openai_compatible():
 if __name__ == "__main__":
     print("Ollama Proxy API Examples\n" + "="*50)
     
-    try:
-        example_get_models()
-        example_get_stats()
-        example_non_streaming_request()
-        example_streaming_request()
-        example_conversation()
-        example_rate_limit_handling()
-        
-        # example_monitor_stats(10)
-        # example_openai_compatible()
-        
-    except KeyboardInterrupt:
-        print("\n\nInterrupted by user")
-    except Exception as e:
-        print(f"\n\nError: {e}")
+    mode = os.getenv("EXAMPLES_MODE", "basic").lower()
+    if mode == "full":
+        examples = [
+            example_get_models,
+            example_get_stats,
+            example_non_streaming_request,
+            example_streaming_request,
+            example_conversation,
+            example_rate_limit_handling,
+            example_openai_compatible,
+        ]
+    else:
+        examples = [
+            example_get_models,
+            example_get_stats,
+        ]
+
+    for fn in examples:
+        try:
+            fn()
+        except KeyboardInterrupt:
+            print("\n\nInterrupted by user")
+            break
+        except Exception as e:
+            print(f"\n[{fn.__name__}] failed: {e}")

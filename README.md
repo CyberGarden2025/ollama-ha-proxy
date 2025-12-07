@@ -57,7 +57,7 @@ make worker-logs
 
 ```bash
 make gateway-build
-BACKEND_PROXY_URL=http://192.168.1.218:5345 make gateway-up
+BACKEND_PROXY_URL=https://ha-proxy.k-lab.su make gateway-up
 make gateway-logs
 ```
 

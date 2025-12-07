@@ -70,21 +70,41 @@ type JobMeta struct {
 	Error       string    `json:"error,omitempty"`
 }
 
-type OllamaStreamResponse struct {
+// StreamChunk is a flexible representation that covers both Ollama native and OpenAI-compatible streaming payloads.
+type StreamChunk struct {
 	Model     string `json:"model"`
 	CreatedAt string `json:"created_at"`
-	Message   struct {
+
+	// Ollama-native fields
+	Message struct {
 		Role    string `json:"role"`
 		Content string `json:"content"`
 	} `json:"message"`
-	Done               bool   `json:"done"`
-	DoneReason         string `json:"done_reason,omitempty"`
-	TotalDuration      int64  `json:"total_duration,omitempty"`
-	LoadDuration       int64  `json:"load_duration,omitempty"`
-	PromptEvalCount    int    `json:"prompt_eval_count,omitempty"`
-	PromptEvalDuration int64  `json:"prompt_eval_duration,omitempty"`
-	EvalCount          int    `json:"eval_count,omitempty"`
-	EvalDuration       int64  `json:"eval_duration,omitempty"`
+	Response    string `json:"response,omitempty"`
+	Done        bool   `json:"done"`
+	DoneReason  string `json:"done_reason,omitempty"`
+	FinishError string `json:"error,omitempty"`
+
+	// OpenAI-compatible fields
+	Choices []struct {
+		Delta struct {
+			Content string `json:"content,omitempty"`
+			Role    string `json:"role,omitempty"`
+		} `json:"delta,omitempty"`
+		Message struct {
+			Content string `json:"content,omitempty"`
+			Role    string `json:"role,omitempty"`
+		} `json:"message,omitempty"`
+		FinishReason string `json:"finish_reason,omitempty"`
+	} `json:"choices,omitempty"`
+
+	// Metrics (optional)
+	TotalDuration      int64 `json:"total_duration,omitempty"`
+	LoadDuration       int64 `json:"load_duration,omitempty"`
+	PromptEvalCount    int   `json:"prompt_eval_count,omitempty"`
+	PromptEvalDuration int64 `json:"prompt_eval_duration,omitempty"`
+	EvalCount          int   `json:"eval_count,omitempty"`
+	EvalDuration       int64 `json:"eval_duration,omitempty"`
 }
 
 type Storage struct {
@@ -366,8 +386,6 @@ func (w *Worker) processJob(jobID string) {
 	// allow large tokens for streaming responses
 	buf := make([]byte, 0, 1024*64)
 	scanner.Buffer(buf, 1024*1024)
-	finishReason := "stop"
-
 	for scanner.Scan() {
 		if w.isCancelled(jobID) {
 			w.finishJobWithError(jobID, "cancelled")
@@ -383,10 +401,34 @@ func (w *Worker) processJob(jobID string) {
 			break
 		}
 
-		var streamResp OllamaStreamResponse
+		var streamResp StreamChunk
 		if err := json.Unmarshal([]byte(payload), &streamResp); err != nil {
 			w.finishJobWithError(jobID, fmt.Sprintf("decode error: %v", err))
 			return
+		}
+
+		content := streamResp.Message.Content
+		finishReason := streamResp.DoneReason
+
+		if content == "" && len(streamResp.Choices) > 0 {
+			c := streamResp.Choices[0]
+			if c.Delta.Content != "" {
+				content = c.Delta.Content
+			} else if c.Message.Content != "" {
+				content = c.Message.Content
+			}
+			if finishReason == "" {
+				finishReason = c.FinishReason
+			}
+		}
+
+		if content == "" && streamResp.Response != "" {
+			content = streamResp.Response
+		}
+
+		done := streamResp.Done
+		if !done && finishReason != "" {
+			done = true
 		}
 
 		seq, err := w.storage.IncrSeq(jobID)
@@ -397,13 +439,13 @@ func (w *Worker) processJob(jobID string) {
 
 		chunk := ChunkData{
 			Seq:   seq,
-			Delta: streamResp.Message.Content,
-			Done:  streamResp.Done,
+			Delta: content,
+			Done:  done,
 		}
 
-		if streamResp.Done {
-			if streamResp.DoneReason == "length" {
-				finishReason = "length"
+		if chunk.Done {
+			if finishReason == "" {
+				finishReason = "stop"
 			}
 			chunk.FinishReason = finishReason
 		}
@@ -412,7 +454,7 @@ func (w *Worker) processJob(jobID string) {
 			log.Printf("Failed to add chunk for job %s: %v", jobID, err)
 		}
 
-		if streamResp.Done {
+		if chunk.Done {
 			break
 		}
 	}

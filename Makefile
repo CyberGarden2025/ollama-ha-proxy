@@ -1,5 +1,7 @@
 COMPOSE_FILE := compose.yaml
 GATEWAY_HOST_PORT ?= 18080
+GATEWAY_URL ?= http://localhost:$(GATEWAY_HOST_PORT)
+EXAMPLES_MODE ?= basic
 
 .PHONY: gateway-build gateway-up gateway-down gateway-logs gateway-restart \
         worker-build worker-up worker-down worker-logs worker-restart \
@@ -65,3 +67,9 @@ test-stats:
 
 health-gateway:
 	curl http://localhost:$(GATEWAY_HOST_PORT)/health
+
+uv-run-examples:
+	NO_PROXY=localhost,127.0.0.1,::1 no_proxy=localhost,127.0.0.1,::1 BASE_URL=$(GATEWAY_URL) EXAMPLES_MODE=$(EXAMPLES_MODE) uv run examples/use_ollama_with_proxy.py
+
+uv-run-openai:
+	NO_PROXY=localhost,127.0.0.1,::1 no_proxy=localhost,127.0.0.1,::1 BASE_URL=$(GATEWAY_URL) uv run --extra openai examples/use_ollama_with_proxy.py
