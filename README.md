@@ -57,7 +57,7 @@ make worker-logs
 
 ```bash
 make gateway-build
-BACKEND_PROXY_URL=https://ha-proxy.k-lab.su make gateway-up
+BACKEND_PROXY_URL=http://192.168.1.218:5345 make gateway-up
 make gateway-logs
 ```
 
@@ -69,7 +69,7 @@ make local-up
 make local-down
 ```
 
-`compose.yaml` использует профили `gateway` и `worker`, поэтому команды Makefile запускают только нужные сервисы на выбранной машине.
+`compose.yaml` использует профили `gateway` и `worker`, поэтому команды Makefile запускают только нужные сервисы на выбранной машине. По умолчанию gateway в compose подключается к удалённому воркеру по IP `http://192.168.1.218:5345`; при необходимости можно переопределить `BACKEND_PROXY_URL`.
 
 > Если порт 5345 или 18080 на хосте занят, задайте другие значения перед запуском, например:
 > `WORKER_HOST_PORT=15345 GATEWAY_HOST_PORT=18081 make local-up`
